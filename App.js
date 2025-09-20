@@ -1,8 +1,3 @@
-import { StatusBar } from 'expo-status-bar';
-import { Text, View, TextInput, TouchableOpacity, Keyboard, Alert, ScrollView } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import styles from './style';
-import { useState, useEffect } from 'react';
 
 export default function App() {
   const [nome, setNome] = useState('');
@@ -10,8 +5,14 @@ export default function App() {
   const [senha, setSenha] = useState('');
   const [codigo, setCodigo] = useState('');
   const [cadastro, setCadastro] = useState([]);
+  const db = SQLite.openDatabase({ name: 'cadastro.db', location: 'default' });
 
   useEffect(() => {
+    db.transaction(tx => {
+      tx.executeSql(
+        'CREATE TABLE IF NOT EXISTS contatos (codigo TEXT PRIMARY KEY, nome TEXT, email TEXT, senha TEXT);'
+      );
+    }, (err) => Alert.alert('Erro', err?.message || 'Erro ao criar tabela'));
     carregaDados();
   }, []);
   function criacaoCodigo(){
@@ -20,43 +21,69 @@ export default function App() {
     return codigo;
   }
 
-  async function Cadastrar() {
+  function Cadastrar() {
     const registro = !codigo;
     const novoCodigo = registro ? criacaoCodigo() : codigo;
-    const obj = {
-      codigo: novoCodigo,
-      nome,
-      email,
-      senha
-    };
-    try {
-      let novaLista = [...cadastro];
+    db.transaction(tx => {
       if (registro) {
-        novaLista.push(obj);
+        tx.executeSql(
+          'INSERT INTO contatos (codigo, nome, email, senha) VALUES (?, ?, ?, ?);',
+          [novoCodigo, nome, email, senha],
+          () => {
+            Alert.alert('Sucesso', 'Cadastro realizado com sucesso!');
+            Limpar();
+            carregaDados();
+          },
+          (_, error) => { Alert.alert('Erro', error.message); return false; }
+        );
       } else {
-        const index = novaLista.findIndex(item => item.codigo === codigo);
-        if (index >= 0) {
-          novaLista[index] = obj;
-        }
+        tx.executeSql(
+          'UPDATE contatos SET nome=?, email=?, senha=? WHERE codigo=?;',
+          [nome, email, senha, codigo],
+          () => {
+            Alert.alert('Sucesso', 'Contato atualizado!');
+            Limpar();
+            carregaDados();
+          },
+          (_, error) => { Alert.alert('Erro', error.message); return false; }
+        );
       }
-      setCadastro(novaLista);
-      await AsyncStorage.setItem('@cadastro', JSON.stringify(novaLista));
-      Alert.alert('Sucesso', 'Cadastro realizado com sucesso!');
-      Limpar();
-    } catch (e) {
-      Alert.alert('Erro', e.toString());
-    }
+    });
   }
 
-  async function carregaDados() {
-    try {
-      const jsonValue = await AsyncStorage.getItem('@cadastro');
-      if (jsonValue != null) {
-        setCadastro(JSON.parse(jsonValue));
-      }
-    } catch (e) {
-      Alert.alert('Erro', e.toString());
-    }
+  function carregaDados() {
+    db.transaction(tx => {
+      tx.executeSql('SELECT * FROM contatos;', [], (tx, results) => {
+        let rows = results.rows;
+        let lista = [];
+        for (let i = 0; i < rows.length; i++) {
+          lista.push(rows.item(i));
+        }
+        setCadastro(lista);
+      });
+    });
+  }
+
+  function editarContato(contato) {
+    setNome(contato.nome);
+    setEmail(contato.email);
+    setSenha(contato.senha);
+    setCodigo(contato.codigo);
+  }
+
+  function excluirContato(codigoContato) {
+    db.transaction(tx => {
+      tx.executeSql(
+        'DELETE FROM contatos WHERE codigo=?;',
+        [codigoContato],
+        () => {
+          Alert.alert('Excluído', 'Contato removido!');
+          if (codigo === codigoContato) Limpar();
+          carregaDados();
+        },
+        (_, error) => { Alert.alert('Erro', error.message); return false; }
+      );
+    });
   }
 
   function Limpar() {
@@ -110,12 +137,32 @@ export default function App() {
 
       <View style={styles.areaBotoes}>
         <TouchableOpacity style={styles.botao} onPress={Cadastrar}>
-          <Text style={styles.textoBotao}>Salvar</Text>
+          <Text style={styles.textoBotao}>{codigo ? 'Atualizar' : 'Salvar'}</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.botaoCancelar} onPress={Limpar}>
           <Text style={styles.textoBotao}>Cancelar</Text>
         </TouchableOpacity>
       </View>
+
+      <Text style={[styles.titulo, {marginTop: 30}]}>Contatos Salvos</Text>
+      {cadastro.length === 0 && (
+        <Text style={styles.label}>Nenhum contato salvo.</Text>
+      )}
+      {cadastro.map((contato) => (
+        <View key={contato.codigo} style={{borderWidth:1, borderColor:'#ccc', borderRadius:8, padding:10, marginVertical:5}}>
+          <Text style={styles.label}>Nome: {contato.nome}</Text>
+          <Text style={styles.label}>Email: {contato.email}</Text>
+          <Text style={styles.label}>Senha: {contato.senha}</Text>
+          <View style={{flexDirection:'row', justifyContent:'space-between', marginTop:5}}>
+            <TouchableOpacity style={[styles.botao, {flex:1, marginRight:5}]} onPress={() => editarContato(contato)}>
+              <Text style={styles.textoBotao}>Editar</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.botaoCancelar, {flex:1, marginLeft:5}]} onPress={() => excluirContato(contato.codigo)}>
+              <Text style={styles.textoBotao}>Excluir</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      ))}
 
       <StatusBar style="auto" />
     </ScrollView>
